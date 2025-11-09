@@ -346,6 +346,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return new PathPlannerAuto(pathName);
     }
 
+    // Need to add this code in order to put the Subsystem onto the dashboard. Copied from SubsystemBase
     @Override
     public void initSendable(SendableBuilder builder) {
         builder.setSmartDashboardType("Subsystem");

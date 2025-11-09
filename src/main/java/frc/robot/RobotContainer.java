@@ -85,6 +85,7 @@ public class RobotContainer {
         configureBindings();
 
         autoChooser = AutoBuilder.buildAutoChooser("Auto Paths");
+        // Send the driveTrain to the dashboard to help us know what command the Subsystem is running
         SmartDashboard.putData("Swerve", drivetrain);
         SmartDashboard.putData("Auto Mode", autoChooser);
 
@@ -97,18 +98,14 @@ public class RobotContainer {
     private void configureBindings() {
         // Note that X is defined as forward according to WPILib convention,
         // and Y is defined as to the left according to WPILib convention.
-        if(RobotBase.isSimulation()) {
-
-        } else {
-            drivetrain.setDefaultCommand(
-                    // Drivetrain will execute this command periodically
-                    drivetrain.applyRequest(() ->
-                            drive.withVelocityX(-driverXbox.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
-                                    .withVelocityY(-driverXbox.getLeftX() * MaxSpeed) // Drive left with negative X (left)
-                                    .withRotationalRate(-driverXbox.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
-                    )
-            );
-        }
+        drivetrain.setDefaultCommand(
+                // Drivetrain will execute this command periodically
+                drivetrain.applyRequest(() ->
+                        drive.withVelocityX(-driverXbox.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
+                                .withVelocityY(-driverXbox.getLeftX() * MaxSpeed) // Drive left with negative X (left)
+                                .withRotationalRate(-driverXbox.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
+                )
+        );
 
         // Idle while the robot is disabled. This ensures the configured
         // neutral mode is applied to the drive motors while disabled.
@@ -211,13 +208,15 @@ public class RobotContainer {
                 }
             }
 
-            // Return the path to follow
+            // AutoBuilder.pathfindToPose() returns a command, which we use to follow the path
             return AutoBuilder.pathfindToPose(
                     targetPose,
                     constraints,
                     0.0 // Goal end velocity in meters/sec
             );
-        }, Set.of(drivetrain)).withName("DriveToPose");
+        },
+        // Use 'Set.of()' to set the Command's Subsystem requirements for a deferred command
+        Set.of(drivetrain)).withName("DriveToPose"); // Name the command to help with debugging
     }
 
     public Command getAutonomousCommand() {
