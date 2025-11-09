@@ -7,16 +7,15 @@ package frc.robot;
 import static edu.wpi.first.units.Units.*;
 
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.commands.FollowPathCommand;
-import com.pathplanner.lib.commands.PathfindingCommand;
 import com.pathplanner.lib.path.PathConstraints;
-import com.pathplanner.lib.path.PathPlannerPath;
-import com.pathplanner.lib.pathfinding.Pathfinding;
 
 import edu.wpi.first.cscore.UsbCamera;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -24,9 +23,10 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
-import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.*;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
@@ -43,7 +43,6 @@ import frc.robot.commands.CoralIntake;
 import frc.robot.commands.PID_SetClawPosition;
 import frc.robot.commands.PID_SetLiftPosition;
 import frc.robot.commands.CoralShoot;
-import frc.robot.commands.Hang;
 import frc.robot.Constants.ClawConstants;
 import frc.robot.Constants.LiftConstants;
 
@@ -86,6 +85,7 @@ public class RobotContainer {
         configureBindings();
 
         autoChooser = AutoBuilder.buildAutoChooser("Auto Paths");
+        SmartDashboard.putData("Swerve", drivetrain);
         SmartDashboard.putData("Auto Mode", autoChooser);
 
         configureBindings();
@@ -97,14 +97,18 @@ public class RobotContainer {
     private void configureBindings() {
         // Note that X is defined as forward according to WPILib convention,
         // and Y is defined as to the left according to WPILib convention.
-        drivetrain.setDefaultCommand(
-            // Drivetrain will execute this command periodically
-            drivetrain.applyRequest(() ->
-                drive.withVelocityX(-driverXbox.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
-                    .withVelocityY(-driverXbox.getLeftX() * MaxSpeed) // Drive left with negative X (left)
-                    .withRotationalRate(-driverXbox.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
-            )
-        );
+        if(RobotBase.isSimulation()) {
+
+        } else {
+            drivetrain.setDefaultCommand(
+                    // Drivetrain will execute this command periodically
+                    drivetrain.applyRequest(() ->
+                            drive.withVelocityX(-driverXbox.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
+                                    .withVelocityY(-driverXbox.getLeftX() * MaxSpeed) // Drive left with negative X (left)
+                                    .withRotationalRate(-driverXbox.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
+                    )
+            );
+        }
 
         // Idle while the robot is disabled. This ensures the configured
         // neutral mode is applied to the drive motors while disabled.
@@ -129,23 +133,6 @@ public class RobotContainer {
         driverXbox.leftBumper().onTrue(drivetrain.runOnce(() -> drivetrain.seedFieldCentric()));
 
         drivetrain.registerTelemetry(logger::telemeterize);
-
-        Pose2d closeLeft;
-        //blue alliance targets
-        if (ally.get() == Alliance.Blue)
-        {
-            closeLeft = new Pose2d(3.9, 5.4, Rotation2d.fromDegrees(-88.9));
-        }
-        else 
-        {
-            closeLeft = new Pose2d(10, 5, Rotation2d.fromDegrees(180));
-        }
-
-        // Create the constraints to use while pathfinding
-        PathConstraints constraints = new PathConstraints(
-                3.0, 4.0,
-                Units.degreesToRadians(540), Units.degreesToRadians(720));
-
 
         //REEFSCAPE SPECIFIC BINDINGS
         mechXbox.leftTrigger().whileTrue(m_clawWheel.wheelForward());
@@ -179,14 +166,10 @@ public class RobotContainer {
 
         mechXbox.leftStick().whileTrue(new AlgaeShoot(m_claw, m_clawWheel, ClawConstants.kClawSetpoint2, m_lift));
 
-        driverXbox.a().whileTrue(AutoBuilder.pathfindToPose(
-            closeLeft,
-            constraints,
-            0.0 // Goal end velocity in meters/sec
-        ));
+
+        driverXbox.a().whileTrue(generateDriveToTargetCommand());
 
         //driverXbox.y().whileTrue(new Hang(m_hang));
-
 
         //driverXbox.a().whileTrue(CommandSwerveDrivetrain.driveToPose(new Pose2d(new Translation2d(2, 2), Rotation2d.fromDegrees(0))) );
         //driverXbox.b().onTrue(CommandSwerveDrivetrain.driveToPose(new Pose2d(new Translation2d(2, 2), Rotation2d.fromDegrees(0))) );
@@ -195,6 +178,46 @@ public class RobotContainer {
         //driverXbox.leftTrigger().whileTrue(m_lift.lowerLift());
         //driverXbox.rightTrigger().whileTrue(m_lift.raiseLift());
         drivetrain.registerTelemetry(logger::telemeterize);
+    }
+
+    // Create the constraints to use while pathfinding
+    PathConstraints constraints = new PathConstraints(
+            3.0, 4.0,
+            Units.degreesToRadians(540), Units.degreesToRadians(720));
+
+    // Move the path logic to a function
+    public Command generateDriveToTargetCommand() {
+        /** You must 'defer' the command in order for it to work properly. Commands are 'static' in that they
+         * initialize everything on code startup. In this case, the logic below will always use the pose kZero, because
+         * the code is processed on boot. To avoid this, we use 'Commands.defer()' to have the command be generated when
+         * we call it from the button press in order to process the logic properly.
+         *
+         * For a historical perspective, Command-based programming does this in order to 're-use' commands to avoid the
+         * memory/CPU overhead costs that would be incurred if commands were constantly generated, which can have an
+         * impact on the code's performance due to the roboRIO's specs. So long as you don't do this too much, using
+         * 'Commands.defer()' shouldn't cause issues.
+         *
+         */
+        return Commands.defer(()-> {
+            var allianceColor = DriverStation.getAlliance();
+            Pose2d targetPose = Pose2d.kZero;
+
+            if (allianceColor.isPresent()) {
+                //blue alliance targets
+                if (allianceColor.get() == Alliance.Blue) {
+                    targetPose = new Pose2d(3.9, 5.4, Rotation2d.fromDegrees(-88.9));
+                } else {
+                    targetPose = new Pose2d(10, 5, Rotation2d.fromDegrees(180));
+                }
+            }
+
+            // Return the path to follow
+            return AutoBuilder.pathfindToPose(
+                    targetPose,
+                    constraints,
+                    0.0 // Goal end velocity in meters/sec
+            );
+        }, Set.of(drivetrain)).withName("DriveToPose");
     }
 
     public Command getAutonomousCommand() {
